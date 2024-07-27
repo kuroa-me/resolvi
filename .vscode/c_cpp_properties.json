@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "defines": [
+                "RTE_LIB_EVENTDEV"
+            ],
+            "intelliSenseMode": "linux-gcc-x64",
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}

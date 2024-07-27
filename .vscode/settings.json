@@ -1,0 +1,19 @@
+{
+  "files.associations": {
+    "*.conf": "properties",
+    "signal.h": "c",
+    "resolvi_event.h": "c",
+    "resolvi_cache.h": "c",
+    "rte_common.h": "c",
+    "resolvi_common.h": "c",
+    "rte_hash.h": "c",
+    "rte_byteorder.h": "c",
+    "rte_mempool.h": "c",
+    "rte_event_eth_rx_adapter.h": "c",
+    "rte_event_eth_tx_adapter.h": "c",
+    "rte_hash_crc.h": "c",
+    "rte_malloc.h": "c",
+    "typeinfo": "c",
+    "in.h": "c"
+  }
+}
