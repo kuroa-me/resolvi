@@ -96,3 +96,8 @@ struct dns_cache_item *get_resolvi_cache(const int socket_id,
 void *del_resolvi_cache(const int socket_id, const int cache_id) {
   resolvi_cache[socket_id][cache_id] = NULL;
 }
+
+void *set_resolvi_cache(const int socket_id, const int cache_id,
+                        struct dns_cache_item *item) {
+  resolvi_cache[socket_id][cache_id] = item;
+}

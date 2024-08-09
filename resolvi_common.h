@@ -127,6 +127,9 @@ struct resolvi_pkt_info {
   };
   struct rte_udp_hdr *udp_hdr;
   struct resolvi_dns_hdr *dns_hdr;
+
+  char **dns_name;
+  uint16_t dns_len;
 };
 
 struct resolvi_resources {

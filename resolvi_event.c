@@ -163,6 +163,7 @@ static __rte_always_inline void resolvi_event_phys_handle(
   uint8_t virt_q_id = evt_rsrc->evq.event_q_id[evt_rsrc->evq.nb_queues - 1];
   char *dns_name = NULL;
   int verdict, cache_id, ret;
+  uint16_t dns_rcode;
 
   rte_prefetch0(rte_pktmbuf_mtod(mbuf, void *));
 
@@ -174,16 +175,16 @@ static __rte_always_inline void resolvi_event_phys_handle(
   if (verdict != CONTINUE) goto TX;
   verdict = resolvi_l4_verdict(rsrc, mbuf, &info, true);
   if (verdict != CONTINUE) goto TX;
-  verdict = resolvi_l7_verdict(rsrc, mbuf, &info, true, &dns_name);
+  verdict = resolvi_l7_verdict(rsrc, mbuf, &info, true);
   if (verdict != CONTINUE) goto TX;
 
   lookup_struct = get_resolvi_cache_lookup_struct(socket_id);
 
-  sig = rte_hash_hash(lookup_struct, (const void *)dns_name);
+  sig = rte_hash_hash(lookup_struct, (const void *)info.dns_name);
   printf("sig: %" PRIu32 "\n", sig);
 
-  cache_id =
-      rte_hash_lookup_with_hash(lookup_struct, (const void *)dns_name, sig);
+  cache_id = rte_hash_lookup_with_hash(lookup_struct,
+                                       (const void *)info.dns_name, sig);
   printf("cache_id: %d\n", cache_id);
   fflush(stdout);
   if (cache_id < 0) {
@@ -208,6 +209,8 @@ static __rte_always_inline void resolvi_event_phys_handle(
   verdict = resolvi_reverse_pkt(rsrc, mbuf, &info, cache);
 
 TX:
+  printf("\n");
+  fflush(stdout);
   if (dns_name != NULL) rte_mempool_put(rsrc->dns_label_pool, dns_name);
 
   /* CONTINUE defaults to TX */
@@ -250,9 +253,9 @@ static __rte_always_inline void resolvi_event_virt_handle(
   struct dns_cache_item *cache;
   hash_sig_t sig;
   uint16_t dst_port;
+  uint16_t rcode;
   uint8_t phys_q_id = evt_rsrc->evq.event_q_id[evt_rsrc->evq.nb_queues - 2];
   uint8_t virt_q_id = evt_rsrc->evq.event_q_id[evt_rsrc->evq.nb_queues - 1];
-  char *dns_name = NULL;
   uint32_t hdrlen, ptype;
   int verdict, cache_id, ret;
 
@@ -272,34 +275,60 @@ static __rte_always_inline void resolvi_event_virt_handle(
   if (verdict != CONTINUE) goto TX;
   verdict = resolvi_l4_verdict(rsrc, mbuf, &info, false);
   if (verdict != CONTINUE) goto TX;
-  verdict = resolvi_l7_verdict(rsrc, mbuf, &info, false, &dns_name);
+  verdict = resolvi_l7_verdict(rsrc, mbuf, &info, false);
   if (verdict != CONTINUE) goto TX;
 
+  /* Doing a lookup in the cache */
   lookup_struct = get_resolvi_cache_lookup_struct(socket_id);
 
-  sig = rte_hash_hash(lookup_struct, (const void *)dns_name);
+  sig = rte_hash_hash(lookup_struct, (const void *)*info.dns_name);
   printf("sig: %" PRIu32 "\n", sig);
 
-  cache_id =
-      rte_hash_lookup_with_hash(lookup_struct, (const void *)dns_name, sig);
-  printf("cache_id: %d\n", cache_id);
-  fflush(stdout);
-  if (cache_id < 0) {
+  cache_id = rte_hash_lookup_with_hash(lookup_struct,
+                                       (const void *)*info.dns_name, sig);
+  printf("lookup cache_id: %d\n", cache_id);
+  if (cache_id < 0 && cache_id != -ENOENT) {
     verdict = PKT_PASS;
     goto TX;
+  }
+  cache = get_resolvi_cache(socket_id, cache_id);
+
+  if (cache_id < 0) {
+    cache_id = rte_hash_add_key_with_hash(lookup_struct,
+                                          (const void *)*info.dns_name, sig);
+    printf("add cache_id: %d\n", cache_id);
+    if (cache_id < 0) {
+      verdict = PKT_PASS;
+      goto TX;
+    }
+
+    cache = rte_zmalloc("dns_cache_item", sizeof(struct dns_cache_item), 0);
+    if (cache == NULL) {
+      printf("dns_cache_item malloc failed\n");
+      verdict = PKT_PASS;
+      goto TX;
+    }
+
+    set_resolvi_cache(socket_id, cache_id, cache);
   }
 
-  cache = get_resolvi_cache(socket_id, cache_id);
-  if (cache == NULL) {
-    verdict = PKT_PASS;
-    goto TX;
-  }
+  /* Record the RCODE */
+  rcode = info.dns_hdr->flags | DNS_RCODE_MASK;
+  cache->type = rcode == DNS_RCODE_SUCCESS    ? DNS_CACHE_POSITIVE
+                : rcode == DNS_RCODE_NXDOMAIN ? DNS_CACHE_NXDOMAIN
+                                              : DNS_CACHE_RCODE;
+  // TODO: Setting a valid TTL require us to further process the response.
+  cache->until = rte_get_timer_cycles() + CACHE_TTL_MAX_HZ;
+  rte_memcpy(cache->full_packet, info.dns_hdr,
+             RTE_MAX(info.dns_len, DNS_PACKET_UNICAST_SIZE_MAX));
 
 TX:
   printf("\n");
   fflush(stdout);
 
-  if (dns_name != NULL) rte_mempool_put(rsrc->dns_label_pool, dns_name);
+  if (info.dns_name != NULL)
+    rte_mempool_put(rsrc->dns_label_pool, info.dns_name);
+  info.dns_name = NULL;
 
   /* CONTINUE defaults to TX */
   if (verdict == CONTINUE) verdict = PKT_TX;

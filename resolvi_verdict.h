@@ -39,7 +39,7 @@ static __rte_always_inline int resolvi_l3_verdict(
     if (ipv6_hdr->proto != IPPROTO_UDP) return PKT_PASS;
     info->l4_off = info->l3_off + sizeof(struct rte_ipv6_hdr);
     verdict = CONTINUE;
-    printf("l3 type: %IPv6 -> ");
+    printf("l3 type: IPv6 -> ");
   }
 
   fflush(stdout);
@@ -57,11 +57,10 @@ static __rte_always_inline int resolvi_l4_verdict(
   printf("l4 port: %d -> ", rte_be_to_cpu_16(udp_hdr->dst_port));
   fflush(stdout);
 
-  if (is_qry)
-    if (udp_hdr->dst_port != RTE_BE16(53))
-      return PKT_PASS;
-    else if (udp_hdr->src_port != RTE_BE16(53))
-      return PKT_PASS;
+  if (is_qry && udp_hdr->dst_port != RTE_BE16(53))
+    return PKT_PASS;
+  else if (udp_hdr->src_port != RTE_BE16(53))
+    return PKT_PASS;
   info->l7_off = info->l4_off + sizeof(struct rte_udp_hdr);
 
   return CONTINUE;
@@ -86,17 +85,17 @@ resolvi_read_label(struct resolvi_resources *rsrc, struct rte_mbuf *mbuf,
 
 #define DNS_QRY_FLAGS_MASK 0xFF01
 #define DNS_RSP_FLAGS_MASK 0xFF8F
+#define DNS_RCODE_MASK 0x0F00
 
 static __rte_always_inline int resolvi_l7_verdict(
     struct resolvi_resources *rsrc, struct rte_mbuf *mbuf,
-    struct resolvi_pkt_info *info, bool is_qry, char **dns_name) {
-  struct resolvi_dns_hdr *dns_hdr;
+    struct resolvi_pkt_info *info, bool is_qry) {
   void *buf = NULL;
   char *label, *name;
-  uint16_t label_len = 0, name_len = 0;
+  uint16_t label_len = 0, name_len = 0, dns_len = 0, rcode = 0;
+  int verdict = PKT_PASS;
   // TODO: Temporary
   char domain[] = "bilibili";
-  int verdict = PKT_PASS;
 
   if (rte_mempool_get(rsrc->dns_label_pool, &buf) < 0) {
     // TODO: While this should NEVER happen, in prod we should handle this.
@@ -109,19 +108,32 @@ static __rte_always_inline int resolvi_l7_verdict(
   name = (char *)buf;
   label = (char *)(buf + DNS_MAX_QUERY_NAME);
 
-  *dns_name = name;
+  /* Calculate DNS portion length. */
+  dns_len = mbuf->pkt_len - info->l7_off;
+  info->dns_len = dns_len;
 
-  dns_hdr =
+  /* Record DNS name. */
+  info->dns_name = &name;
+
+  info->dns_hdr =
       rte_pktmbuf_mtod_offset(mbuf, struct resolvi_dns_hdr *, info->l7_off);
-  printf("l7 flags: %04x -> ", dns_hdr->flags);
+  printf("l7 flags: %04x -> ", info->dns_hdr->flags);
   fflush(stdout);
   // Test for supported DNS header flags
   if (is_qry) {
-    if ((dns_hdr->flags | DNS_QRY_FLAGS_MASK) != DNS_QRY_FLAGS_MASK)
-      return PKT_PASS;
+    if ((info->dns_hdr->flags | DNS_QRY_FLAGS_MASK) != DNS_QRY_FLAGS_MASK) {
+      verdict = PKT_PASS;
+      goto OUT;
+    }
   } else {
-    if ((dns_hdr->flags | DNS_RSP_FLAGS_MASK) != DNS_RSP_FLAGS_MASK)
-      return PKT_PASS;
+    if ((info->dns_hdr->flags | DNS_RSP_FLAGS_MASK) != DNS_RSP_FLAGS_MASK) {
+      verdict = PKT_PASS;
+      goto OUT;
+    }
+    if (dns_len > DNS_PACKET_UNICAST_SIZE_MAX) {
+      verdict = PKT_PASS;
+      goto OUT;
+    }
   }
   info->cur_off = info->l7_off + sizeof(struct resolvi_dns_hdr);
 
@@ -143,9 +155,11 @@ static __rte_always_inline int resolvi_l7_verdict(
   printf("Name Len: %d, Name: %s, verdict: %d\n", name_len, name, verdict);
   fflush(stdout);
 
-  // Postponde the put action
-  // rte_mempool_put(rsrc->dns_label_pool, buf);
+  return CONTINUE;
 
+OUT:
+  // Postpone mempool put
+  rte_mempool_put(rsrc->dns_label_pool, buf);
   return verdict;
 }
 
