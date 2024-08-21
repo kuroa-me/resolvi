@@ -161,7 +161,6 @@ static __rte_always_inline void resolvi_event_phys_handle(
   uint16_t offset = 0;
   uint8_t phys_q_id = evt_rsrc->evq.event_q_id[evt_rsrc->evq.nb_queues - 2];
   uint8_t virt_q_id = evt_rsrc->evq.event_q_id[evt_rsrc->evq.nb_queues - 1];
-  char *dns_name = NULL;
   int verdict, cache_id, ret;
   uint16_t dns_rcode;
 
@@ -180,11 +179,11 @@ static __rte_always_inline void resolvi_event_phys_handle(
 
   lookup_struct = get_resolvi_cache_lookup_struct(socket_id);
 
-  sig = rte_hash_hash(lookup_struct, (const void *)info.dns_name);
+  sig = rte_hash_hash(lookup_struct, (const void *)*info.dns_name);
   printf("sig: %" PRIu32 "\n", sig);
 
   cache_id = rte_hash_lookup_with_hash(lookup_struct,
-                                       (const void *)info.dns_name, sig);
+                                       (const void *)*info.dns_name, sig);
   printf("cache_id: %d\n", cache_id);
   fflush(stdout);
   if (cache_id < 0) {
@@ -197,9 +196,11 @@ static __rte_always_inline void resolvi_event_phys_handle(
     verdict = PKT_PASS;
     goto TX;
   }
+  printf("got cache: %p\n", cache);
 
-  if (cache->until > rte_rdtsc()) {
-    rte_hash_del_key_with_hash(lookup_struct, (const void *)dns_name, sig);
+  if (cache->until < rte_rdtsc()) {
+    rte_hash_del_key_with_hash(lookup_struct, (const void *)*info.dns_name,
+                               sig);
     del_resolvi_cache(socket_id, cache_id);
     rte_mempool_put(rsrc->dns_cache_pool, cache);
     verdict = PKT_PASS;
@@ -211,7 +212,9 @@ static __rte_always_inline void resolvi_event_phys_handle(
 TX:
   printf("\n");
   fflush(stdout);
-  if (dns_name != NULL) rte_mempool_put(rsrc->dns_label_pool, dns_name);
+  if (info.dns_name != NULL)
+    rte_mempool_put(rsrc->dns_label_pool, info.dns_name);
+  info.dns_name = NULL;
 
   /* CONTINUE defaults to TX */
   if (verdict == CONTINUE) verdict = PKT_TX;
@@ -293,6 +296,7 @@ static __rte_always_inline void resolvi_event_virt_handle(
   }
   cache = get_resolvi_cache(socket_id, cache_id);
 
+  /* Add a new entry to the cache */
   if (cache_id < 0) {
     cache_id = rte_hash_add_key_with_hash(lookup_struct,
                                           (const void *)*info.dns_name, sig);
@@ -310,9 +314,11 @@ static __rte_always_inline void resolvi_event_virt_handle(
     }
 
     set_resolvi_cache(socket_id, cache_id, cache);
+  } else {
+    printf("got cache: %p", cache);
   }
 
-  /* Record the RCODE */
+  /* Update the cache */
   rcode = info.dns_hdr->flags | DNS_RCODE_MASK;
   cache->type = rcode == DNS_RCODE_SUCCESS    ? DNS_CACHE_POSITIVE
                 : rcode == DNS_RCODE_NXDOMAIN ? DNS_CACHE_NXDOMAIN

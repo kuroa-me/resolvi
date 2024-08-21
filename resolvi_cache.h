@@ -104,8 +104,8 @@ void setup_label(struct resolvi_resources *rsrc, const int socketid);
 struct rte_hash *get_resolvi_cache_lookup_struct(const int socketid);
 struct dns_cache_item *get_resolvi_cache(const int socket_id,
                                          const int cache_id);
-void *del_resolvi_cache(const int socket_id, const int cache_id);
-void *set_resolvi_cache(const int socket_id, const int cache_id,
-                        struct dns_cache_item *item);
+void del_resolvi_cache(const int socket_id, const int cache_id);
+void set_resolvi_cache(const int socket_id, const int cache_id,
+                       struct dns_cache_item *item);
 
 #endif /* __RESOLVI_CACHE_H__ */
