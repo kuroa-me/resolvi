@@ -7,8 +7,8 @@
 static __rte_always_inline int resolvi_l3_verdict(
     struct resolvi_resources *rsrc, struct rte_mbuf *mbuf,
     struct resolvi_pkt_info *info) {
-  struct rte_ipv4_hdr *ipv4_hdr = info->ipv4_hdr;
-  struct rte_ipv6_hdr *ipv6_hdr = info->ipv6_hdr;
+  struct rte_ipv4_hdr *ipv4_hdr;
+  struct rte_ipv6_hdr *ipv6_hdr;
   uint32_t pkt_type, l3_type, is_udp;
   int verdict = PKT_PASS;
 
@@ -30,6 +30,7 @@ static __rte_always_inline int resolvi_l3_verdict(
     info->l4_off = info->l3_off + ipv4_hdr->ihl * 4;
     verdict = CONTINUE;
     printf("l3 type: IPv4 -> ");
+    info->ipv4_hdr = ipv4_hdr;
   }
   if (RTE_ETH_IS_IPV6_HDR(pkt_type)) {
     ipv6_hdr = rte_pktmbuf_mtod_offset(mbuf, struct rte_ipv6_hdr *,
@@ -40,6 +41,7 @@ static __rte_always_inline int resolvi_l3_verdict(
     info->l4_off = info->l3_off + sizeof(struct rte_ipv6_hdr);
     verdict = CONTINUE;
     printf("l3 type: IPv6 -> ");
+    info->ipv6_hdr = ipv6_hdr;
   }
 
   fflush(stdout);
@@ -50,7 +52,7 @@ static __rte_always_inline int resolvi_l3_verdict(
 static __rte_always_inline int resolvi_l4_verdict(
     struct resolvi_resources *rsrc, struct rte_mbuf *mbuf,
     struct resolvi_pkt_info *info, bool is_qry) {
-  struct rte_udp_hdr *udp_hdr = info->udp_hdr;
+  struct rte_udp_hdr *udp_hdr;
 
   udp_hdr = rte_pktmbuf_mtod_offset(mbuf, struct rte_udp_hdr *, info->l4_off);
 
@@ -61,7 +63,9 @@ static __rte_always_inline int resolvi_l4_verdict(
     return PKT_PASS;
   else if (udp_hdr->src_port != RTE_BE16(53))
     return PKT_PASS;
+
   info->l7_off = info->l4_off + sizeof(struct rte_udp_hdr);
+  info->udp_hdr = udp_hdr;
 
   return CONTINUE;
 }
@@ -138,7 +142,7 @@ static __rte_always_inline int resolvi_l7_verdict(
   info->cur_off = info->l7_off + sizeof(struct resolvi_dns_hdr);
 
   do {
-    memset(label, 0, DNS_MAX_LABEL_LEN);
+    // memset(label, 0, DNS_MAX_LABEL_LEN);
     label_len = resolvi_read_label(rsrc, mbuf, info, label);
     if (label_len == 0) {
       name[name_len - 1] = '\0';
@@ -185,9 +189,9 @@ static __rte_always_inline int resolvi_reverse_pkt(
   }
 
   /* Append DNS response */
-  len = strlen(cache->full_packet);
+  len = cache->pkt_len;
   append_loc = rte_pktmbuf_append(mbuf, len);
-  if (append_loc) {
+  if (append_loc == NULL) {
     printf("Failed to append packet\n");
     return PKT_PASS;
   }

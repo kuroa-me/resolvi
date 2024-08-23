@@ -325,8 +325,9 @@ static __rte_always_inline void resolvi_event_virt_handle(
                                               : DNS_CACHE_RCODE;
   // TODO: Setting a valid TTL require us to further process the response.
   cache->until = rte_get_timer_cycles() + CACHE_TTL_MAX_HZ;
-  rte_memcpy(cache->full_packet, info.dns_hdr,
-             RTE_MAX(info.dns_len, DNS_PACKET_UNICAST_SIZE_MAX));
+  cache->pkt_len = RTE_MIN(info.dns_len, DNS_PACKET_UNICAST_SIZE_MAX);
+  printf("dns payload len: %d", cache->pkt_len);
+  rte_memcpy(cache->full_packet, (void *)info.dns_hdr, cache->pkt_len);
 
 TX:
   printf("\n");

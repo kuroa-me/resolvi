@@ -78,6 +78,7 @@ typedef enum dns_cache_item_type {
 struct dns_cache_item {
   dns_cache_item_type type;
   uint64_t until;
+  uint16_t pkt_len;
   char full_packet[DNS_PACKET_UNICAST_SIZE_MAX];
 } __rte_cache_aligned;
 
