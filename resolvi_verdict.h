@@ -56,13 +56,13 @@ static __rte_always_inline int resolvi_l4_verdict(
 
   udp_hdr = rte_pktmbuf_mtod_offset(mbuf, struct rte_udp_hdr *, info->l4_off);
 
-  printf("l4 port: %d -> ", rte_be_to_cpu_16(udp_hdr->dst_port));
-  fflush(stdout);
-
-  if (is_qry && udp_hdr->dst_port != RTE_BE16(53))
-    return PKT_PASS;
-  else if (udp_hdr->src_port != RTE_BE16(53))
-    return PKT_PASS;
+  if (is_qry) {
+    printf("l4 port: %d -> ", rte_be_to_cpu_16(udp_hdr->dst_port));
+    if (udp_hdr->dst_port != RTE_BE16(53)) return PKT_PASS;
+  } else {
+    printf("l4 port: %d -> ", rte_be_to_cpu_16(udp_hdr->src_port));
+    if (udp_hdr->src_port != RTE_BE16(53)) return PKT_PASS;
+  }
 
   info->l7_off = info->l4_off + sizeof(struct rte_udp_hdr);
   info->udp_hdr = udp_hdr;
@@ -230,6 +230,8 @@ static __rte_always_inline int resolvi_reverse_pkt(
     else if (RTE_ETH_IS_IPV6_HDR(mbuf->packet_type))
       rte_ipv6_udptcp_cksum_mbuf(mbuf, ipv6_hdr, info->l4_off);
   }
+
+  return CONTINUE;
 }
 
 #endif /* __RESOLVI_VERDICT_H__ */
